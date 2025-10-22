@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"/>
-<title>Quartz Catcher — Mobile</title>
+<title>Quartz Catcher — Android</title>
 <style>
   :root{--hud:#66ffff}
   html,body{height:100%;margin:0;background:#000;overflow:hidden;-webkit-user-select:none;touch-action:none}
@@ -23,7 +23,6 @@
     padding:8px 14px;
     border-radius:10px;
     font-weight:700;
-    backdrop-filter: blur(4px);
   }
   /* initial full-screen start overlay */
   #startOverlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:40;background:linear-gradient(0deg, rgba(0,0,0,0.6), rgba(0,0,0,0.25));}
@@ -54,16 +53,31 @@
 <script>
 (() => {
   const canvas = document.getElementById('game');
-  const ctx = canvas.getContext('2d', { alpha: false });
+  const ctx = canvas.getContext('2d'); // REMOVED {alpha:false} for Android compatibility
   const scoreEl = document.getElementById('score');
   const highEl = document.getElementById('high');
   const actionBtn = document.getElementById('actionBtn');
   const startOverlay = document.getElementById('startOverlay');
   const startBtn = document.getElementById('startBtn');
 
-  // canvas size
+  // Android WebView compatibility fixes
+  let dpr = window.devicePixelRatio || 1;
   let W=0,H=0;
-  function resize(){ W = canvas.width = innerWidth; H = canvas.height = innerHeight; player.baseY = Math.max(50, H - 86); player.x = Math.min(Math.max(player.x,0), W-player.w); }
+  
+  function resize(){ 
+    W = canvas.width = window.innerWidth * dpr;
+    H = canvas.height = window.innerHeight * dpr;
+    
+    // Scale canvas CSS size to match device pixels
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+    
+    // Scale the context to handle high DPI displays
+    ctx.scale(dpr, dpr);
+    
+    player.baseY = Math.max(50, window.innerHeight - 86);
+    player.x = Math.min(Math.max(player.x,0), window.innerWidth - player.w);
+  }
   window.addEventListener('resize', resize, { passive: true });
 
   // HUD state
@@ -73,32 +87,53 @@
   highEl.textContent = 'High: ' + high;
 
   // player pad
-  const player = { x:0, w:120, h:18, baseY:0, hue:190, bounce:0, speed:14, color(){ return 'hsl('+this.hue+',100%,50%)' } };
+  const player = { 
+    x:0, 
+    w:120, 
+    h:18, 
+    baseY:0, 
+    hue:190, 
+    bounce:0, 
+    speed:14, 
+    color(){ return 'hsl('+this.hue+',100%,50%)' } 
+  };
 
   // speed control parameters
-  const BASE_SPEED = 6;           // fresh start base
-  const SPEED_PER_SEC = 0.01;     // gradual increase per second (very slow)
-  const SPEED_PER_CATCH = 0.03;   // small bump per successful catch
-  const SPEED_CAP = 16;           // maximum speed
-  let elapsedRunningMs = 0;       // time since current run started (ms)
+  const BASE_SPEED = 6;
+  const SPEED_PER_SEC = 0.01;
+  const SPEED_PER_CATCH = 0.03;
+  const SPEED_CAP = 16;
+  let elapsedRunningMs = 0;
   let quartz = null;
   let particles = [];
 
-  function makeQuartz(speedOverride){ return {
-    x: Math.random() * Math.max(1, W - 34),
-    y: -40 - Math.random()*160,
-    size: 28,
-    baseSpeed: (typeof speedOverride === 'number') ? speedOverride : BASE_SPEED,
-    speed: (typeof speedOverride === 'number') ? speedOverride : BASE_SPEED,
-    hue: Math.random()*360,
-    trail: []
-  }; }
+  function makeQuartz(speedOverride){ 
+    return {
+      x: Math.random() * Math.max(1, window.innerWidth - 34),
+      y: -40 - Math.random()*160,
+      size: 28,
+      baseSpeed: (typeof speedOverride === 'number') ? speedOverride : BASE_SPEED,
+      speed: (typeof speedOverride === 'number') ? speedOverride : BASE_SPEED,
+      hue: Math.random()*360,
+      trail: []
+    }; 
+  }
 
   quartz = makeQuartz();
 
-  // stars field
+  // stars field - FIXED for Android WebView
   const stars = [];
-  for(let i=0;i<150;i++) stars.push({ x:Math.random()*2000, y:Math.random()*2000, r:Math.random()*1.2+0.6, base:Math.random()*0.6+0.12, speed:Math.random()*0.08+0.01, phase:Math.random()*Math.PI*2 });
+  const starCount = 80; // Reduced for performance
+  for(let i=0; i<starCount; i++) {
+    stars.push({ 
+      x: Math.random() * window.innerWidth,
+      y: Math.random() * window.innerHeight, 
+      r: Math.random()*1.5+0.8, 
+      base: Math.random()*0.6+0.12, 
+      speed: Math.random()*0.08+0.01, 
+      phase: Math.random()*Math.PI*2 
+    });
+  }
 
   // state: 'stopped' | 'running' | 'paused'
   let state = 'stopped';
@@ -107,55 +142,102 @@
   const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
   function vibrate(ms){ if('vibrate' in navigator) navigator.vibrate(ms); }
 
-  // drawing helpers
+  // drawing helpers - OPTIMIZED for Android
   function drawNight(now){
-    const g = ctx.createLinearGradient(0,0,0,H);
-    g.addColorStop(0,'#071022'); g.addColorStop(1,'#000010');
-    ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+    // Simple solid background for Android compatibility
+    ctx.fillStyle = '#000010';
+    ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+    
+    // Draw stars with simplified rendering
     for(const s of stars){
-      if(s.x > W) s.x = Math.random() * W;
-      if(s.y > H) s.y = Math.random() * H;
-      const a = clamp(s.base + 0.5 * Math.sin(now/1000 + s.phase), 0.04, 1);
-      ctx.beginPath(); ctx.fillStyle = 'rgba(255,255,255,'+a+')'; ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill();
-      if(a > 0.22){ ctx.beginPath(); ctx.fillStyle = 'rgba(255,255,255,'+(a*0.06)+')'; ctx.arc(s.x,s.y,s.r*3,0,Math.PI*2); ctx.fill(); }
-      s.y += s.speed; if(s.y > H) s.y = 0;
+      // Reset star if it goes off screen
+      if(s.y > window.innerHeight) {
+        s.y = 0;
+        s.x = Math.random() * window.innerWidth;
+      }
+      
+      const a = clamp(s.base + 0.3 * Math.sin(now/1200 + s.phase), 0.04, 1);
+      ctx.beginPath(); 
+      ctx.fillStyle = 'rgba(255,255,255,'+a+')'; 
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); 
+      ctx.fill();
+      
+      s.y += s.speed;
     }
   }
 
   function drawPlayer(){
     const yOff = Math.sin(player.bounce) * 6;
-    ctx.save(); ctx.fillStyle = player.color(); ctx.shadowBlur = 18; ctx.shadowColor = player.color();
-    ctx.fillRect(player.x, player.baseY - yOff, player.w, player.h); ctx.restore();
+    ctx.save(); 
+    ctx.fillStyle = player.color(); 
+    // Simplified shadow for Android
+    ctx.shadowBlur = 12; 
+    ctx.shadowColor = player.color();
+    ctx.fillRect(player.x, player.baseY - yOff, player.w, player.h); 
+    ctx.restore();
   }
 
   function drawQuartz(q){
     q.hue = (q.hue + 2.4) % 360;
-    for(let i=0;i<q.trail.length;i++){
+    
+    // Simplified trail for Android performance
+    for(let i=0; i<q.trail.length; i++){
       const t = q.trail[i], alpha = 1 - (i / q.trail.length);
-      ctx.save(); ctx.fillStyle = 'hsla(' + q.hue + ',100%,50%,' + (alpha*0.16) + ')';
-      ctx.beginPath(); ctx.arc(t.x, t.y, (q.size * alpha) * 0.45, 0, Math.PI*2); ctx.fill(); ctx.restore();
+      ctx.save(); 
+      ctx.fillStyle = 'hsla(' + q.hue + ',100%,50%,' + (alpha*0.12) + ')';
+      ctx.beginPath(); 
+      ctx.arc(t.x, t.y, (q.size * alpha) * 0.4, 0, Math.PI*2); 
+      ctx.fill(); 
+      ctx.restore();
     }
-    ctx.save(); ctx.beginPath(); ctx.fillStyle = 'hsl(' + q.hue + ',100%,50%)';
-    ctx.shadowBlur = 18; ctx.shadowColor = 'hsl(' + q.hue + ',100%,60%)';
-    ctx.arc(q.x + q.size/2, q.y + q.size/2, q.size/2, 0, Math.PI*2); ctx.fill(); ctx.restore();
-    q.trail.unshift({ x: q.x + q.size/2, y: q.y + q.size/2 }); if(q.trail.length > 18) q.trail.pop();
+    
+    ctx.save(); 
+    ctx.beginPath(); 
+    ctx.fillStyle = 'hsl(' + q.hue + ',100%,50%)';
+    // Reduced shadow for Android
+    ctx.shadowBlur = 12; 
+    ctx.shadowColor = 'hsl(' + q.hue + ',100%,60%)';
+    ctx.arc(q.x + q.size/2, q.y + q.size/2, q.size/2, 0, Math.PI*2); 
+    ctx.fill(); 
+    ctx.restore();
+    
+    q.trail.unshift({ x: q.x + q.size/2, y: q.y + q.size/2 }); 
+    if(q.trail.length > 12) q.trail.pop(); // Reduced trail length
   }
 
   function spawnParticles(x,y,hue){
-    for(let i=0;i<12;i++){
+    for(let i=0;i<8;i++){ // Reduced particle count
       const a = Math.random()*Math.PI*2, s = 1 + Math.random()*2.2;
-      particles.push({ x:x+(Math.random()-0.5)*8, y:y+(Math.random()-0.5)*8, vx:Math.cos(a)*s, vy:Math.sin(a)*s*0.6, s:Math.random()*4+2, color:'hsl('+(hue + (Math.random()*40-20))+',100%,60%)', life:30 + Math.floor(Math.random()*20) });
-    }
-  }
-  function drawParticles(){
-    for(let i=particles.length-1;i>=0;i--){
-      const p = particles[i];
-      ctx.save(); ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x,p.y,p.s,0,Math.PI*2); ctx.fill(); ctx.restore();
-      p.x += p.vx; p.y += p.vy; p.s *= 0.94; p.life--; if(p.s < 0.6 || p.life <= 0) particles.splice(i,1);
+      particles.push({ 
+        x:x+(Math.random()-0.5)*8, 
+        y:y+(Math.random()-0.5)*8, 
+        vx:Math.cos(a)*s, 
+        vy:Math.sin(a)*s*0.6, 
+        s:Math.random()*3+2, 
+        color:'hsl('+(hue + (Math.random()*40-20))+',100%,60%)', 
+        life:20 + Math.floor(Math.random()*15) 
+      });
     }
   }
 
-  // reset to fresh state (used on game over)
+  function drawParticles(){
+    for(let i=particles.length-1;i>=0;i--){
+      const p = particles[i];
+      ctx.save(); 
+      ctx.fillStyle = p.color; 
+      ctx.beginPath(); 
+      ctx.arc(p.x, p.y, p.s, 0, Math.PI*2); 
+      ctx.fill(); 
+      ctx.restore();
+      p.x += p.vx; 
+      p.y += p.vy; 
+      p.s *= 0.94; 
+      p.life--; 
+      if(p.s < 0.6 || p.life <= 0) particles.splice(i,1);
+    }
+  }
+
+  // reset to fresh state
   function resetToFresh(){
     elapsedRunningMs = 0;
     quartz = makeQuartz(BASE_SPEED);
@@ -164,35 +246,38 @@
     player.bounce = 0;
   }
 
-  // public reset when missed
+  // game over function
   function gameOver(){
-    // store high
-    if(score > high){ high = score; localStorage.setItem('qc_high', String(high)); highEl.textContent = 'High: ' + high; }
-    // reset scoreboard and UI
-    score = 0; scoreEl.textContent = 'Score: ' + score;
+    if(score > high){ 
+      high = score; 
+      localStorage.setItem('qc_high', String(high)); 
+      highEl.textContent = 'High: ' + high; 
+    }
+    score = 0; 
+    scoreEl.textContent = 'Score: ' + score;
     resetToFresh();
     state = 'stopped';
     startOverlay.style.display = 'flex';
     actionBtn.style.display = 'none';
-    // vibrate already done in caller
   }
 
-  // update per frame (dt in ms)
+  // update per frame
   function update(dt){
     if(state !== 'running') return;
-    // update elapsed
+    
     elapsedRunningMs += dt;
 
     // compute dynamic speed
-    const timeBoost = (elapsedRunningMs / 1000) * SPEED_PER_SEC; // slow increase over time
-    const catchBoost = score * SPEED_PER_CATCH; // mild scale with score
+    const timeBoost = (elapsedRunningMs / 1000) * SPEED_PER_SEC;
+    const catchBoost = score * SPEED_PER_CATCH;
     const targetSpeed = clamp(BASE_SPEED + timeBoost + catchBoost, BASE_SPEED, SPEED_CAP);
+    
     // move quartz
     quartz.speed = targetSpeed;
     quartz.y += quartz.speed * (dt / 16.67);
 
-    // miss
-    if(quartz.y > H){
+    // miss detection
+    if(quartz.y > window.innerHeight){
       vibrate(170);
       gameOver();
       return;
@@ -207,10 +292,9 @@
         scoreEl.textContent = 'Score: ' + score;
         spawnParticles(quartz.x + quartz.size/2, quartz.y + quartz.size/2, quartz.hue);
         player.hue = quartz.hue;
-        quartz.x = Math.random() * Math.max(1, W - quartz.size);
+        quartz.x = Math.random() * Math.max(1, window.innerWidth - quartz.size);
         quartz.y = -40 - Math.random() * 160;
         quartz.trail.length = 0;
-        // small speed bump on catch (already handled via score scaling)
         player.bounce += 0.5;
       }
     }
@@ -223,9 +307,10 @@
     const dt = Math.min(50, now - lastFrame);
     lastFrame = now;
 
-    // update + draw
     if(state === 'running') update(dt);
-    ctx.clearRect(0,0,W,H);
+    
+    // Clear with dimensions in CSS pixels
+    ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
     drawNight(now);
     drawParticles();
     drawQuartz(quartz);
@@ -234,40 +319,37 @@
     requestAnimationFrame(loop);
   }
 
-  // input handling
+  // Android-optimized input handling
   canvas.addEventListener('touchmove', e=>{
-    const t = e.touches[0];
-    const rect = canvas.getBoundingClientRect();
-    const px = t.clientX - rect.left;
-    player.x = clamp(px - player.w/2, 0, W - player.w);
-    e.preventDefault();
+    if(e.touches.length > 0){
+      const t = e.touches[0];
+      const px = t.clientX;
+      player.x = clamp(px - player.w/2, 0, window.innerWidth - player.w);
+      e.preventDefault();
+    }
   }, { passive: false });
 
   canvas.addEventListener('mousedown', e=>{
-    const rect = canvas.getBoundingClientRect();
-    const px = e.clientX - rect.left;
-    player.x = clamp(px - player.w/2, 0, W - player.w);
+    const px = e.clientX;
+    player.x = clamp(px - player.w/2, 0, window.innerWidth - player.w);
   });
 
   // single action button logic
   actionBtn.addEventListener('click', ()=>{
     if(state === 'stopped'){
-      // Start pressed (from overlay or hidden start)
       startOverlay.style.display = 'none';
       actionBtn.style.display = 'inline-block';
       actionBtn.textContent = 'Stop';
-      // fresh start
-      score = 0; scoreEl.textContent = 'Score: ' + score;
+      score = 0; 
+      scoreEl.textContent = 'Score: ' + score;
       resetToFresh();
       state = 'running';
       lastFrame = performance.now();
       requestAnimationFrame(loop);
     } else if(state === 'running'){
-      // Stop -> pause
       state = 'paused';
       actionBtn.textContent = 'Resume';
     } else if(state === 'paused'){
-      // Resume
       state = 'running';
       actionBtn.textContent = 'Stop';
       lastFrame = performance.now();
@@ -275,33 +357,53 @@
     }
   });
 
-  // start overlay button (initial)
+  // start overlay button
   startBtn.addEventListener('click', ()=>{
     startOverlay.style.display = 'none';
     actionBtn.style.display = 'inline-block';
     actionBtn.textContent = 'Stop';
-    score = 0; scoreEl.textContent = 'Score: ' + score;
+    score = 0; 
+    scoreEl.textContent = 'Score: ' + score;
     resetToFresh();
     state = 'running';
     lastFrame = performance.now();
     requestAnimationFrame(loop);
   });
 
-  // initialization
+  // Android-optimized initialization
   function init(){
-    player.x = (innerWidth - player.w) * 0.5;
+    player.x = (window.innerWidth - player.w) * 0.5;
     resize();
-    for(const s of stars){ if(s.x > W) s.x = Math.random()*W; if(s.y > H) s.y = Math.random()*H; }
-    // hide action button initially (overlay visible)
+    
+    // Reinitialize stars for current screen size
+    stars.length = 0;
+    for(let i=0; i<starCount; i++) {
+      stars.push({ 
+        x: Math.random() * window.innerWidth,
+        y: Math.random() * window.innerHeight, 
+        r: Math.random()*1.5+0.8, 
+        base: Math.random()*0.6+0.12, 
+        speed: Math.random()*0.08+0.01, 
+        phase: Math.random()*Math.PI*2 
+      });
+    }
+    
     actionBtn.style.display = 'none';
+    
     // initial draw
-    ctx.clearRect(0,0,W,H);
+    ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
     drawNight(performance.now());
     drawQuartz(quartz);
     drawPlayer();
   }
 
-  init();
+  // Start when DOM is ready
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+  
   // expose reset for debug
   window.qcReset = ()=>{ gameOver(); };
 })();
