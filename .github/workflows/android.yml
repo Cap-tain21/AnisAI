@@ -1,5 +1,4 @@
-# .github/workflows/android.yml
-name: Quartz Catcher Android Build
+name: Android Build
 
 on:
   push:
@@ -14,10 +13,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
+    - name: Checkout repo
       uses: actions/checkout@v3
 
-    - name: Set up Java JDK 17
+    - name: Set up Java JDK
       uses: actions/setup-java@v3
       with:
         distribution: 'temurin'
@@ -32,28 +31,14 @@ jobs:
     - name: Accept SDK licenses
       run: yes | sdkmanager --licenses
 
-    - name: Install Cordova globally
+    - name: Install dependencies
       run: npm install -g cordova
-
-    - name: Install project dependencies
-      run: |
-        cd quartzGame
-        npm install
-
-    - name: Add Android platform
-      run: |
-        cd quartzGame
-        cordova platform add android --force
 
     - name: Build Android debug APK
       run: |
         cd quartzGame
+        cordova platform add android --force
         cordova build android --debug
-
-    - name: List APK for verification
-      run: |
-        cd quartzGame/platforms/android/app/build/outputs/apk/debug/
-        ls -lh
 
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4

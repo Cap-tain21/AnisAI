@@ -1,23 +1,72 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"/>
-<title>Quartz Catcher — Mobile</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Quartz Catcher — Fullscreen</title>
 <style>
-:root{--hud:#66ffff}
-html,body{height:100%;margin:0;background:#000;overflow:hidden;-webkit-user-select:none;}
-canvas{display:block;width:100vw;height:100vh;touch-action:none;}
-#score{position:fixed;left:12px;top:12px;color:var(--hud);font:600 18px/1 monospace;text-shadow:0 0 8px rgba(102,255,255,0.15);z-index:10}
-#highscore{position:fixed;right:12px;top:12px;color:var(--hud);font:600 18px/1 monospace;text-shadow:0 0 8px rgba(102,255,255,0.15);z-index:10}
+  html, body {margin:0; padding:0; overflow:hidden; background:#000; color:#fff; font-family:sans-serif;}
+  #gameCanvas {display:block; width:100vw; height:100vh; background:#111;}
+  #menu {position:fixed; top:10px; right:10px; z-index:99;}
+  button {background:#222; color:#fff; border:none; padding:8px 12px; margin:3px; border-radius:6px;}
+  #settings {display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:#333; padding:20px; border-radius:12px;}
 </style>
 </head>
 <body>
-<div id="score">Score: 0</div>
-<div id="highscore">High: 0</div>
-<canvas id="game"></canvas>
+
+<canvas id="gameCanvas"></canvas>
+
+<div id="menu">
+  <button id="fullscreenBtn">⛶</button>
+  <button id="settingsBtn">⚙</button>
+</div>
+
+<div id="settings">
+  <label>Dark Mode <input type="checkbox" id="darkModeToggle"></label><br><br>
+  <label>Accent Color <input type="color" id="colorPicker" value="#00ffcc"></label><br><br>
+  <button id="closeSettings">Close</button>
+</div>
+
 <script>
-/* JavaScript game code here: quartz catcher full logic */
+const canvas=document.getElementById('gameCanvas');
+const ctx=canvas.getContext('2d');
+
+function resize(){canvas.width=innerWidth; canvas.height=innerHeight;}
+window.addEventListener('resize',resize);
+resize();
+
+// Dummy game draw
+function draw(){ctx.fillStyle="#00ffcc"; ctx.fillRect(canvas.width/2-25, canvas.height/2-25,50,50); requestAnimationFrame(draw);}
+draw();
+
+// Fullscreen button
+document.getElementById('fullscreenBtn').onclick=()=>{
+  const el=document.documentElement;
+  if(el.requestFullscreen) el.requestFullscreen();
+  if(window.navigator.userAgent.includes("Android")){
+    screen.orientation.lock('portrait').catch(()=>{});
+  }
+};
+
+// Settings panel
+const settings=document.getElementById('settings');
+document.getElementById('settingsBtn').onclick=()=>settings.style.display='block';
+document.getElementById('closeSettings').onclick=()=>settings.style.display='none';
+
+// Dark mode
+const darkToggle=document.getElementById('darkModeToggle');
+darkToggle.onchange=()=>{
+  document.body.style.background=darkToggle.checked?'#000':'#fff';
+  document.body.style.color=darkToggle.checked?'#fff':'#000';
+};
+
+// Accent color
+document.getElementById('colorPicker').oninput=e=>{
+  ctx.fillStyle=e.target.value;
+};
 </script>
 </body>
 </html>

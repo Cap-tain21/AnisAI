@@ -5,102 +5,305 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"/>
 <title>Quartz Catcher — Mobile</title>
 <style>
-:root{--hud:#66ffff}
-html,body{height:100%;margin:0;background:#000;overflow:hidden;-webkit-user-select:none;}
-canvas{display:block;width:100vw;height:100vh;touch-action:none;}
-#score{position:fixed;left:12px;top:12px;color:var(--hud);font:600 18px/1 monospace;text-shadow:0 0 8px rgba(102,255,255,0.15);z-index:10}
-#highscore{position:fixed;right:12px;top:12px;color:var(--hud);font:600 18px/1 monospace;text-shadow:0 0 8px rgba(102,255,255,0.15);z-index:10}
+  :root{--hud:#66ffff}
+  html,body{height:100%;margin:0;background:#000;overflow:hidden;-webkit-user-select:none;touch-action:none}
+  canvas{display:block;width:100vw;height:100vh;}
+  #score{position:fixed;left:12px;top:12px;color:var(--hud);font:600 16px/1 monospace;text-shadow:0 0 8px rgba(102,255,255,0.12);z-index:20}
+  #high{position:fixed;right:12px;top:12px;color:var(--hud);font:600 16px/1 monospace;text-shadow:0 0 8px rgba(102,255,255,0.12);z-index:20}
+  /* central single action button (Start / Stop / Resume) */
+  #actionBtn {
+    position:fixed;
+    left:50%;
+    transform:translateX(-50%);
+    top:46px;
+    z-index:30;
+    background:rgba(255,255,255,0.06);
+    border:1px solid rgba(255,255,255,0.08);
+    color:var(--hud);
+    padding:8px 14px;
+    border-radius:10px;
+    font-weight:700;
+    backdrop-filter: blur(4px);
+  }
+  /* initial full-screen start overlay */
+  #startOverlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:40;background:linear-gradient(0deg, rgba(0,0,0,0.6), rgba(0,0,0,0.25));}
+  #startCard{background:rgba(8,10,16,0.95);padding:18px;border-radius:12px;text-align:center;color:#cfe;max-width:92%;box-shadow:0 8px 40px rgba(0,0,0,0.6)}
+  #startCard h1{margin:0 0 8px 0;font-size:20px}
+  #startCard small{display:block;margin-top:8px;color:#9fd}
+  @media (min-width:600px){ #startCard{max-width:420px} }
 </style>
 </head>
 <body>
 <div id="score">Score: 0</div>
-<div id="highscore">High: 0</div>
+<div id="high">High: 0</div>
+
+<button id="actionBtn" aria-label="game action" style="display:none">Start</button>
+
 <canvas id="game"></canvas>
+
+<div id="startOverlay">
+  <div id="startCard">
+    <h1>Quartz Catcher</h1>
+    <div style="margin:12px 0">
+      <button id="startBtn" style="font-size:18px;padding:10px 20px;border-radius:10px;background:var(--hud);border:none;font-weight:700;color:#012">Start Game</button>
+    </div>
+    <small>Touch to move pad. Single quartz falls. If one falls you lose. Game speed resets on new game.</small>
+  </div>
+</div>
+
 <script>
 (() => {
-const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d', {alpha:false});
-const scoreHud = document.getElementById('score');
-const highHud = document.getElementById('highscore');
-let w=0,h=0;
-function resize(){ w=canvas.width=innerWidth; h=canvas.height=innerHeight; player.baseY=Math.max(60,h-140); player.x=Math.max(0,Math.min(player.x,w-player.w)); }
-window.addEventListener('resize', resize,{passive:true});
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const scoreEl = document.getElementById('score');
+  const highEl = document.getElementById('high');
+  const actionBtn = document.getElementById('actionBtn');
+  const startOverlay = document.getElementById('startOverlay');
+  const startBtn = document.getElementById('startBtn');
 
-let score=0;
-let highScore=Number(localStorage.getItem('highScore')||0);
+  // canvas size
+  let W=0,H=0;
+  function resize(){ W = canvas.width = innerWidth; H = canvas.height = innerHeight; player.baseY = Math.max(50, H - 86); player.x = Math.min(Math.max(player.x,0), W-player.w); }
+  window.addEventListener('resize', resize, { passive: true });
 
-const player={x:0,y:0,w:120,h:20,baseY:0,speed:12,hue:190,bounce:0,color(){return 'hsl('+this.hue+',100%,50%)';}};
+  // HUD state
+  let score = 0;
+  let high = parseInt(localStorage.getItem('qc_high')||'0',10) || 0;
+  scoreEl.textContent = 'Score: ' + score;
+  highEl.textContent = 'High: ' + high;
 
-function makeQuartz(){return {x:Math.random()*(Math.max(1,w-30)),y:-30-Math.random()*200,size:26,speed:10+Math.random()*1.5,hue:Math.random()*360,trail:[]};}
-let quartz = makeQuartz();
-let particles=[];
+  // player pad
+  const player = { x:0, w:120, h:18, baseY:0, hue:190, bounce:0, speed:14, color(){ return 'hsl('+this.hue+',100%,50%)' } };
 
-const stars=[];
-for(let i=0;i<150;i++){ stars.push({x:Math.random()*2000,y:Math.random()*2000,r:Math.random()*1.2+0.6,base:Math.random()*0.6+0.2,speed:Math.random()*0.08+0.02,phase:Math.random()*Math.PI*2}); }
+  // speed control parameters
+  const BASE_SPEED = 6;           // fresh start base
+  const SPEED_PER_SEC = 0.01;     // gradual increase per second (very slow)
+  const SPEED_PER_CATCH = 0.03;   // small bump per successful catch
+  const SPEED_CAP = 16;           // maximum speed
+  let elapsedRunningMs = 0;       // time since current run started (ms)
+  let quartz = null;
+  let particles = [];
 
-function drawNightSky(now){
-  const grad=ctx.createLinearGradient(0,0,0,h);
-  grad.addColorStop(0,'#071022'); grad.addColorStop(1,'#000010'); ctx.fillStyle=grad; ctx.fillRect(0,0,w,h);
-  for(let s of stars){
-    if(s.x>w) s.x=Math.random()*w; if(s.y>h) s.y=Math.random()*h;
-    const alpha=Math.max(0.05,Math.min(1,s.base+0.5*Math.sin(now/1000+s.phase)));
-    ctx.beginPath(); ctx.fillStyle='rgba(255,255,255,'+alpha+')'; ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill();
-    if(alpha>0.25){ctx.beginPath();ctx.fillStyle='rgba(255,255,255,'+(alpha*0.08)+')';ctx.arc(s.x,s.y,s.r*3,0,Math.PI*2);ctx.fill();}
-    s.y+=s.speed; if(s.y>h) s.y=0;
+  function makeQuartz(speedOverride){ return {
+    x: Math.random() * Math.max(1, W - 34),
+    y: -40 - Math.random()*160,
+    size: 28,
+    baseSpeed: (typeof speedOverride === 'number') ? speedOverride : BASE_SPEED,
+    speed: (typeof speedOverride === 'number') ? speedOverride : BASE_SPEED,
+    hue: Math.random()*360,
+    trail: []
+  }; }
+
+  quartz = makeQuartz();
+
+  // stars field
+  const stars = [];
+  for(let i=0;i<150;i++) stars.push({ x:Math.random()*2000, y:Math.random()*2000, r:Math.random()*1.2+0.6, base:Math.random()*0.6+0.12, speed:Math.random()*0.08+0.01, phase:Math.random()*Math.PI*2 });
+
+  // state: 'stopped' | 'running' | 'paused'
+  let state = 'stopped';
+  let lastFrame = 0;
+
+  const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+  function vibrate(ms){ if('vibrate' in navigator) navigator.vibrate(ms); }
+
+  // drawing helpers
+  function drawNight(now){
+    const g = ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#071022'); g.addColorStop(1,'#000010');
+    ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+    for(const s of stars){
+      if(s.x > W) s.x = Math.random() * W;
+      if(s.y > H) s.y = Math.random() * H;
+      const a = clamp(s.base + 0.5 * Math.sin(now/1000 + s.phase), 0.04, 1);
+      ctx.beginPath(); ctx.fillStyle = 'rgba(255,255,255,'+a+')'; ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill();
+      if(a > 0.22){ ctx.beginPath(); ctx.fillStyle = 'rgba(255,255,255,'+(a*0.06)+')'; ctx.arc(s.x,s.y,s.r*3,0,Math.PI*2); ctx.fill(); }
+      s.y += s.speed; if(s.y > H) s.y = 0;
+    }
   }
-}
 
-function drawPlayer(){
-  ctx.save();
-  ctx.fillStyle=player.color();
-  ctx.shadowBlur=16; ctx.shadowColor=player.color();
-  const yOffset = Math.sin(player.bounce)*6;
-  ctx.fillRect(player.x, player.baseY - yOffset, player.w, player.h);
-  ctx.restore();
-}
-
-function drawQuartz(q){
-  q.hue=(q.hue+2)%360;
-  for(let i=0;i<q.trail.length;i++){
-    const t=q.trail[i], alpha=1-(i/q.trail.length);
-    ctx.save(); ctx.beginPath(); ctx.fillStyle='hsla('+q.hue+',100%,50%,'+(alpha*0.18)+')'; ctx.arc(t.x,t.y,(q.size*alpha)*0.5,0,Math.PI*2); ctx.fill(); ctx.restore();
+  function drawPlayer(){
+    const yOff = Math.sin(player.bounce) * 6;
+    ctx.save(); ctx.fillStyle = player.color(); ctx.shadowBlur = 18; ctx.shadowColor = player.color();
+    ctx.fillRect(player.x, player.baseY - yOff, player.w, player.h); ctx.restore();
   }
-  ctx.save(); ctx.beginPath(); ctx.fillStyle='hsl('+q.hue+',100%,50%)'; ctx.shadowBlur=18; ctx.shadowColor='hsl('+q.hue+',100%,60%)'; ctx.arc(q.x+q.size/2,q.y+q.size/2,q.size/2,0,Math.PI*2); ctx.fill(); ctx.restore();
-  q.trail.unshift({x:q.x+q.size/2,y:q.y+q.size/2}); if(q.trail.length>18) q.trail.pop();
-}
 
-function drawParticles(){
-  for(let i=particles.length-1;i>=0;i--){
-    const p=particles[i]; ctx.save(); ctx.fillStyle=p.color; ctx.beginPath(); ctx.arc(p.x,p.y,p.s,0,Math.PI*2); ctx.fill(); ctx.restore();
-    p.x+=p.vx; p.y+=p.vy; p.s*=0.96; p.life--; if(p.s<0.6||p.life<=0) particles.splice(i,1);
+  function drawQuartz(q){
+    q.hue = (q.hue + 2.4) % 360;
+    for(let i=0;i<q.trail.length;i++){
+      const t = q.trail[i], alpha = 1 - (i / q.trail.length);
+      ctx.save(); ctx.fillStyle = 'hsla(' + q.hue + ',100%,50%,' + (alpha*0.16) + ')';
+      ctx.beginPath(); ctx.arc(t.x, t.y, (q.size * alpha) * 0.45, 0, Math.PI*2); ctx.fill(); ctx.restore();
+    }
+    ctx.save(); ctx.beginPath(); ctx.fillStyle = 'hsl(' + q.hue + ',100%,50%)';
+    ctx.shadowBlur = 18; ctx.shadowColor = 'hsl(' + q.hue + ',100%,60%)';
+    ctx.arc(q.x + q.size/2, q.y + q.size/2, q.size/2, 0, Math.PI*2); ctx.fill(); ctx.restore();
+    q.trail.unshift({ x: q.x + q.size/2, y: q.y + q.size/2 }); if(q.trail.length > 18) q.trail.pop();
   }
-}
 
-function spawnParticles(x,y,hue){ for(let i=0;i<12;i++){ const angle=Math.random()*Math.PI*2,speed=1+Math.random()*2.2; particles.push({x:x+(Math.random()-0.5)*10,y:y+(Math.random()-0.5)*10,vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed*0.6,s:Math.random()*4+2,color:'hsl('+(hue+(Math.random()*40-20))+',100%,60%)',life:30+Math.floor(Math.random()*20)}); } }
-
-function resetGame(fell=false){ if(score>highScore){ highScore=score; localStorage.setItem('highScore',highScore); } score=0; player.w=120; player.hue=190; quartz=makeQuartz(); quartz.trail=[]; if(fell && navigator.vibrate) navigator.vibrate(170); player.bounce=0;}
-
-function updateGame(){
-  quartz.y+=quartz.speed;
-  if(quartz.y>h){ resetGame(true); player.bounce+=0.7;}
-  if(quartz.x<player.x+player.w && quartz.x+quartz.size>player.x && quartz.y<player.baseY+player.h && quartz.y+quartz.size>player.baseY){
-    score++; spawnParticles(quartz.x+quartz.size/2,quartz.y+quartz.size/2,quartz.hue); player.hue=quartz.hue;
-    quartz.x=Math.random()*(Math.max(1,w-quartz.size)); quartz.y=-40-Math.random()*160; quartz.trail=[]; quartz.hue=Math.random()*360;
-    quartz.speed=10+Math.min(16,score*0.7); if(score%5===0 && player.w>56) player.w-=6;
-    player.bounce+=0.5;
+  function spawnParticles(x,y,hue){
+    for(let i=0;i<12;i++){
+      const a = Math.random()*Math.PI*2, s = 1 + Math.random()*2.2;
+      particles.push({ x:x+(Math.random()-0.5)*8, y:y+(Math.random()-0.5)*8, vx:Math.cos(a)*s, vy:Math.sin(a)*s*0.6, s:Math.random()*4+2, color:'hsl('+(hue + (Math.random()*40-20))+',100%,60%)', life:30 + Math.floor(Math.random()*20) });
+    }
   }
-  player.bounce*=0.92;
-  player.x=Math.max(0,Math.min(player.x,w-player.w));
-}
+  function drawParticles(){
+    for(let i=particles.length-1;i>=0;i--){
+      const p = particles[i];
+      ctx.save(); ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x,p.y,p.s,0,Math.PI*2); ctx.fill(); ctx.restore();
+      p.x += p.vx; p.y += p.vy; p.s *= 0.94; p.life--; if(p.s < 0.6 || p.life <= 0) particles.splice(i,1);
+    }
+  }
 
-document.addEventListener('keydown',(e)=>{if(e.key==='ArrowLeft') player.x-=player.speed; if(e.key==='ArrowRight') player.x+=player.speed;},false);
-canvas.addEventListener('touchmove',(e)=>{player.x=e.touches[0].clientX-player.w/2;e.preventDefault();},{passive:false});
-canvas.addEventListener('mousedown',(e)=>{player.x=e.clientX-player.w/2;},false);
-canvas.addEventListener('mousemove',(e)=>{if(e.buttons) player.x=e.clientX-player.w/2;},false);
+  // reset to fresh state (used on game over)
+  function resetToFresh(){
+    elapsedRunningMs = 0;
+    quartz = makeQuartz(BASE_SPEED);
+    player.w = 120;
+    player.hue = 190;
+    player.bounce = 0;
+  }
 
-function frame(now){ ctx.clearRect(0,0,w,h); drawNightSky(now); drawPlayer(); drawQuartz(quartz); updateGame(); drawParticles(); scoreHud.textContent='Score: '+score; highHud.textContent='High: '+highScore; requestAnimationFrame(frame); }
-function init(){ player.x=(innerWidth-player.w)*0.5; player.baseY=Math.max(60,innerHeight-140); resize(); requestAnimationFrame(frame);}
-init();
+  // public reset when missed
+  function gameOver(){
+    // store high
+    if(score > high){ high = score; localStorage.setItem('qc_high', String(high)); highEl.textContent = 'High: ' + high; }
+    // reset scoreboard and UI
+    score = 0; scoreEl.textContent = 'Score: ' + score;
+    resetToFresh();
+    state = 'stopped';
+    startOverlay.style.display = 'flex';
+    actionBtn.style.display = 'none';
+    // vibrate already done in caller
+  }
+
+  // update per frame (dt in ms)
+  function update(dt){
+    if(state !== 'running') return;
+    // update elapsed
+    elapsedRunningMs += dt;
+
+    // compute dynamic speed
+    const timeBoost = (elapsedRunningMs / 1000) * SPEED_PER_SEC; // slow increase over time
+    const catchBoost = score * SPEED_PER_CATCH; // mild scale with score
+    const targetSpeed = clamp(BASE_SPEED + timeBoost + catchBoost, BASE_SPEED, SPEED_CAP);
+    // move quartz
+    quartz.speed = targetSpeed;
+    quartz.y += quartz.speed * (dt / 16.67);
+
+    // miss
+    if(quartz.y > H){
+      vibrate(170);
+      gameOver();
+      return;
+    }
+
+    // collision check
+    const qBottom = quartz.y + quartz.size;
+    if(qBottom > player.baseY && quartz.y < player.baseY + player.h){
+      if(quartz.x + quartz.size > player.x && quartz.x < player.x + player.w){
+        // caught
+        score++;
+        scoreEl.textContent = 'Score: ' + score;
+        spawnParticles(quartz.x + quartz.size/2, quartz.y + quartz.size/2, quartz.hue);
+        player.hue = quartz.hue;
+        quartz.x = Math.random() * Math.max(1, W - quartz.size);
+        quartz.y = -40 - Math.random() * 160;
+        quartz.trail.length = 0;
+        // small speed bump on catch (already handled via score scaling)
+        player.bounce += 0.5;
+      }
+    }
+    player.bounce *= 0.92;
+  }
+
+  // main loop
+  function loop(now){
+    if(!lastFrame) lastFrame = now;
+    const dt = Math.min(50, now - lastFrame);
+    lastFrame = now;
+
+    // update + draw
+    if(state === 'running') update(dt);
+    ctx.clearRect(0,0,W,H);
+    drawNight(now);
+    drawParticles();
+    drawQuartz(quartz);
+    drawPlayer();
+
+    requestAnimationFrame(loop);
+  }
+
+  // input handling
+  canvas.addEventListener('touchmove', e=>{
+    const t = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const px = t.clientX - rect.left;
+    player.x = clamp(px - player.w/2, 0, W - player.w);
+    e.preventDefault();
+  }, { passive: false });
+
+  canvas.addEventListener('mousedown', e=>{
+    const rect = canvas.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    player.x = clamp(px - player.w/2, 0, W - player.w);
+  });
+
+  // single action button logic
+  actionBtn.addEventListener('click', ()=>{
+    if(state === 'stopped'){
+      // Start pressed (from overlay or hidden start)
+      startOverlay.style.display = 'none';
+      actionBtn.style.display = 'inline-block';
+      actionBtn.textContent = 'Stop';
+      // fresh start
+      score = 0; scoreEl.textContent = 'Score: ' + score;
+      resetToFresh();
+      state = 'running';
+      lastFrame = performance.now();
+      requestAnimationFrame(loop);
+    } else if(state === 'running'){
+      // Stop -> pause
+      state = 'paused';
+      actionBtn.textContent = 'Resume';
+    } else if(state === 'paused'){
+      // Resume
+      state = 'running';
+      actionBtn.textContent = 'Stop';
+      lastFrame = performance.now();
+      requestAnimationFrame(loop);
+    }
+  });
+
+  // start overlay button (initial)
+  startBtn.addEventListener('click', ()=>{
+    startOverlay.style.display = 'none';
+    actionBtn.style.display = 'inline-block';
+    actionBtn.textContent = 'Stop';
+    score = 0; scoreEl.textContent = 'Score: ' + score;
+    resetToFresh();
+    state = 'running';
+    lastFrame = performance.now();
+    requestAnimationFrame(loop);
+  });
+
+  // initialization
+  function init(){
+    player.x = (innerWidth - player.w) * 0.5;
+    resize();
+    for(const s of stars){ if(s.x > W) s.x = Math.random()*W; if(s.y > H) s.y = Math.random()*H; }
+    // hide action button initially (overlay visible)
+    actionBtn.style.display = 'none';
+    // initial draw
+    ctx.clearRect(0,0,W,H);
+    drawNight(performance.now());
+    drawQuartz(quartz);
+    drawPlayer();
+  }
+
+  init();
+  // expose reset for debug
+  window.qcReset = ()=>{ gameOver(); };
 })();
 </script>
 </body>
