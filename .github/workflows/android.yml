@@ -1,0 +1,46 @@
+name: Android Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+
+    - name: Set up Java JDK
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin'
+        java-version: 17
+
+    - name: Set up Android SDK
+      uses: android-actions/setup-android@v3
+      with:
+        api-level: 33
+        build-tools: 33.0.2
+
+    - name: Accept SDK licenses
+      run: yes | sdkmanager --licenses
+
+    - name: Install dependencies
+      run: npm install -g cordova
+
+    - name: Build Android debug APK
+      run: |
+        cordova platform add android --force
+        cordova build android --debug
+
+    - name: Upload APK artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: quartz-debug-apk
+        path: platforms/android/app/build/outputs/apk/debug/app-debug.apk
